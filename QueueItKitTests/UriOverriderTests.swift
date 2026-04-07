@@ -5,7 +5,6 @@ class UriOverriderTests: XCTestCase {
 
     var testObj: UriOverrider!
 
-    // Constants (ported from ArkTS test)
     let TEST_QUEUE_URL_HTTP = "https://customer.queue-it.net/app/enqueue"
     let TEST_QUEUE_URL_DEEPLINK = "qapp://enqueue"
     let TEST_TARGET_URL_HTTP = "https://google.com"
@@ -52,7 +51,7 @@ class UriOverriderTests: XCTestCase {
     func testGivenNavigatingToDifferentUrl_thenShouldReturnOpenExternal() {
         testObj.setQueueUrl("https://vavatest.queue-it.net/app/enqueue")
         testObj.setTargetUrl("https://google.com/q=iamthetarget")
-        // This tests navigation to a URL that is neither a queue URL nor the target URL.
+        
         let destinationUrl = "https://some-other-domain.com"
 
         let result = testObj.handleNavigationRequest(destinationUrl)
@@ -139,7 +138,7 @@ class UriOverriderTests: XCTestCase {
         testObj.setQueueUrl(TEST_QUEUE_URL_HTTP) // "https://customer.queue-it.net/app/enqueue"
         testObj.setTargetUrl("http://localhost:3000")
         testObj.setUserId("myuser1")
-        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.0"
+        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.1"
 
         let result = testObj.handleNavigationRequest(destinationUrl)
 
@@ -154,8 +153,8 @@ class UriOverriderTests: XCTestCase {
         testObj.setQueueUrl(TEST_QUEUE_URL_HTTP) // "https://customer.queue-it.net/app/enqueue"
         testObj.setTargetUrl("http://localhost:3000")
         testObj.setUserId("myuser1")
-        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.0"
-        let expectedRewrittenUrlContains = "http://customer.queue-it.net/exitline.aspx?userId=myuser1&c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.0" // Order of query items might vary
+        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.1"
+        let expectedRewrittenUrlContains = "http://customer.queue-it.net/exitline.aspx?userId=myuser1&c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.1" // Order of query items might vary
 
         let result = testObj.handleNavigationRequest(destinationUrl)
         XCTAssertEqual(result.action, .loadInWebview)
@@ -163,4 +162,104 @@ class UriOverriderTests: XCTestCase {
         XCTAssertNotNil(result.modifiedUrl)
         XCTAssertTrue(result.modifiedUrl!.contains("userId=myuser1"))
     }
+    
+    // MARK: - Behind Proxy Tests
+    
+    func testIsBehindProxy_WithWaitingRoomDomain_ShouldReturnTrue() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "queue.mydomain.com")
+        
+        XCTAssertTrue(testObjWithProxy.isBehindProxy())
+    }
+    
+    func testIsBehindProxy_WithEmptyWaitingRoomDomain_ShouldReturnFalse() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "")
+        
+        XCTAssertFalse(testObjWithProxy.isBehindProxy())
+    }
+    
+    
+    func testIsBehindProxy_WithQueuePathPrefix_ShouldReturnFalse() {
+        let testObjWithProxy = UriOverrider(queuePathPrefix: "queue")
+        
+        XCTAssertFalse(testObjWithProxy.isBehindProxy())
+    }
+    
+    func testIsBehindProxy_WithBothParameters_ShouldReturnTrue() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "mydomain.com", queuePathPrefix: "queue")
+        
+        XCTAssertTrue(testObjWithProxy.isBehindProxy())
+    }
+    
+    func testIsBehindProxy_WithoutParameters_ShouldReturnFalse() {
+        let testObjWithoutProxy = UriOverrider()
+        
+        XCTAssertFalse(testObjWithoutProxy.isBehindProxy())
+    }
+    
+    func testBehindProxy_WithDomainOnly_ShouldHandleCorrectly() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "queue.mydomain.com")
+        testObjWithProxy.setQueueUrl("https://queue.mydomain.com/app/enqueue")
+        testObjWithProxy.setTargetUrl("https://mydomain.com/success")
+        testObjWithProxy.setUserId("testuser123")
+        
+        let destinationUrl = "https://queue.mydomain.com/app/status"
+        let result = testObjWithProxy.handleNavigationRequest(destinationUrl)
+        
+        XCTAssertEqual(result.action, .loadInWebview)
+        XCTAssertNotNil(result.modifiedUrl)
+        XCTAssertTrue(result.modifiedUrl!.contains("userId=testuser123"))
+    }
+    
+    func testBehindProxy_WithDomainAndPrefix_MatchingPath_ShouldHandleCorrectly() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "mydomain.com", queuePathPrefix: "queue")
+        testObjWithProxy.setQueueUrl("https://mydomain.com/queue/app/enqueue")
+        testObjWithProxy.setTargetUrl("https://mydomain.com/success")
+        testObjWithProxy.setUserId("testuser123")
+        
+        let destinationUrl = "https://mydomain.com/queue/app/status"
+        let result = testObjWithProxy.handleNavigationRequest(destinationUrl)
+        
+        XCTAssertEqual(result.action, .loadInWebview)
+        XCTAssertNotNil(result.modifiedUrl)
+        XCTAssertTrue(result.modifiedUrl!.contains("userId=testuser123"))
+    }
+    
+    func testBehindProxy_WithDomainAndPrefix_NonMatchingPath_ShouldNotBeTreatedAsQueueUrl() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "mydomain.com", queuePathPrefix: "queue")
+        testObjWithProxy.setQueueUrl("https://mydomain.com/queue/app/enqueue")
+        testObjWithProxy.setTargetUrl("https://mydomain.com/success")
+        testObjWithProxy.setUserId("testuser123")
+        
+        let destinationUrl = "https://mydomain.com/other/page"
+        let result = testObjWithProxy.handleNavigationRequest(destinationUrl)
+        
+        XCTAssertEqual(result.action, .openExternal)
+    }
+    
+    func testBehindProxy_WithUserIdNeeded_ShouldRewriteUrl() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "queue.mydomain.com")
+        testObjWithProxy.setQueueUrl("https://queue.mydomain.com/app/enqueue")
+        testObjWithProxy.setTargetUrl("https://mydomain.com/success")
+        testObjWithProxy.setUserId("testuser123")
+        
+        let destinationUrl = "https://queue.mydomain.com/app/status?event=test"
+        let result = testObjWithProxy.handleNavigationRequest(destinationUrl)
+        
+        XCTAssertEqual(result.action, .loadInWebview)
+        XCTAssertNotNil(result.modifiedUrl)
+        XCTAssertTrue(result.modifiedUrl!.contains("userId=testuser123"))
+    }
+    
+    func testBehindProxy_CaseInsensitiveDomain() {
+        let testObjWithProxy = UriOverrider(waitingRoomDomain: "Queue.MyDomain.COM")
+        testObjWithProxy.setQueueUrl("https://queue.mydomain.com/app/enqueue")
+        testObjWithProxy.setTargetUrl("https://mydomain.com/success")
+        testObjWithProxy.setUserId("testuser123")
+        
+        let destinationUrl = "https://QUEUE.MYDOMAIN.com/app/status"
+        let result = testObjWithProxy.handleNavigationRequest(destinationUrl)
+        
+        XCTAssertEqual(result.action, .loadInWebview)
+    }
 }
+

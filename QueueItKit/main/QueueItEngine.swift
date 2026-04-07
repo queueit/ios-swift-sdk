@@ -31,10 +31,9 @@ public class QueueItEngine {
         self.queueListener = queueListener
         self.themeName = themeName
         self.language = language
-
         self.options = options ?? QueueItEngineOptions()
         self.provider = QueueItWaitingRoomProvider(customerId: customerId, waitingRoomOrAliasId: waitingRoomOrAliasId, themeName: themeName, language: language, waitingRoomDomain: waitingRoomDomain, queuePathPrefix: queuePathPrefix)
-        self.viewManager = QueueItViewManager(queueListener: queueListener, options: self.options, webView: webView)
+        self.viewManager = QueueItViewManager(queueListener: queueListener, options: self.options, webView: webView, waitingRoomDomain: waitingRoomDomain, queuePathPrefix: queuePathPrefix)
 
         QueueItLogger.info(QueueItEngine.TAG, "QueueItEngine initialized. SDK Version: \(self.sdkVersion)")
     }
