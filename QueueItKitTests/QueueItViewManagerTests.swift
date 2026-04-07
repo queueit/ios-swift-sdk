@@ -92,4 +92,64 @@ class QueueItViewManagerTests: XCTestCase {
         XCTAssertTrue(listener.onQueueViewWillOpenCalled)
         XCTAssertFalse(listener.onErrorCalled)
     }
+    
+    // MARK: - Behind Proxy Tests
+    
+    @MainActor
+    func testViewManagerInitialization_WithBehindProxyParameters() async {
+        // Given
+        let options = QueueItEngineOptions()
+        let waitingRoomDomain = "queue.mydomain.com"
+        let queuePathPrefix = "queue"
+        
+        // When
+        let viewManagerWithProxy = QueueItViewManager(
+            queueListener: listener,
+            options: options,
+            webView: nil,
+            waitingRoomDomain: waitingRoomDomain,
+            queuePathPrefix: queuePathPrefix
+        )
+        
+        // Then
+        XCTAssertNotNil(viewManagerWithProxy)
+        XCTAssertNotNil(viewManagerWithProxy.webView)
+    }
+    
+    @MainActor
+    func testViewManagerInitialization_WithoutBehindProxyParameters() async {
+        // Given
+        let options = QueueItEngineOptions()
+        
+        // When
+        let viewManagerWithoutProxy = QueueItViewManager(
+            queueListener: listener,
+            options: options,
+            webView: nil
+        )
+        
+        // Then
+        XCTAssertNotNil(viewManagerWithoutProxy)
+        XCTAssertNotNil(viewManagerWithoutProxy.webView)
+    }
+    
+    @MainActor
+    func testViewManagerInitialization_WithOnlyWaitingRoomDomain() async {
+        // Given
+        let options = QueueItEngineOptions()
+        let waitingRoomDomain = "queue.mydomain.com"
+        
+        // When
+        let viewManagerWithProxy = QueueItViewManager(
+            queueListener: listener,
+            options: options,
+            webView: nil,
+            waitingRoomDomain: waitingRoomDomain
+        )
+        
+        // Then
+        XCTAssertNotNil(viewManagerWithProxy)
+        XCTAssertNotNil(viewManagerWithProxy.webView)
+    }
 }
+

@@ -28,8 +28,13 @@ class UriOverrider {
     private var targetHost: String?
     private var targetPath: String?
     private var userId: String?
+    private var waitingRoomDomain: String?
+    private var queuePathPrefix: String?
 
-    init() {}
+    init(waitingRoomDomain: String? = nil, queuePathPrefix: String? = nil) {
+        self.waitingRoomDomain = waitingRoomDomain?.isEmpty == true ? nil : waitingRoomDomain
+        self.queuePathPrefix = queuePathPrefix?.isEmpty == true ? nil : queuePathPrefix
+    }
 
     func setQueueUrl(_ queueUrlStr: String?) {
         self.queueHost = URL(string: queueUrlStr ?? "")?.host?.lowercased()
@@ -50,10 +55,19 @@ class UriOverrider {
     func setUserId(_ userId: String?) {
         self.userId = userId
     }
+    
+    func isBehindProxy() -> Bool {
+        return waitingRoomDomain != nil
+    }
+    
+    private func sanitizeQueuePathPrefix(_ queuePathPrefix: String) -> String {
+        let slashSet = CharacterSet(charactersIn: "/ ")
+        return queuePathPrefix.trimmingCharacters(in: slashSet)
+    }
 
     func handleNavigationRequest(_ destinationUrlStr: String) -> UriOverrideResponse {
         QueueItLogger.debug(UriOverrider.TAG, "Intercepting: \(destinationUrlStr)")
-
+        
         if destinationUrlStr.hasPrefix("queueit:") {
             var commandPart = String(destinationUrlStr.dropFirst("queueit:".count))
             if commandPart.hasPrefix("//") {
@@ -97,6 +111,23 @@ class UriOverrider {
             }
 
             let isQueueItDomain = (self.queueHost != nil && host == self.queueHost)
+            
+            if isQueueItDomain && isBehindProxy(){
+                if (queuePathPrefix != nil) {
+                    let prefix = sanitizeQueuePathPrefix(queuePathPrefix!)
+                    if path.hasPrefix("/\(prefix)") {
+                        if let userId = self.userId, QueueUrlHelper.isUrlUpdateNeeded(queueUrlStr: destinationUrlStr, userId: userId) {
+                            let rewrittenUrl = QueueUrlHelper.updateUrl(queueUrlStr: destinationUrlStr, userId: userId)
+                            return UriOverrideResponse(action: .loadInWebview, modifiedUrl: rewrittenUrl)
+                        }
+                        return UriOverrideResponse(action: .`default`)
+                    } else {
+                        QueueItLogger.debug(UriOverrider.TAG, "Behind proxy domain matches but path does not start with /\(prefix) - treating as external")
+                        return UriOverrideResponse(action: .openExternal)
+                    }
+                }
+            }
+            
             if isQueueItDomain {
                 if let userId = self.userId, QueueUrlHelper.isUrlUpdateNeeded(queueUrlStr: destinationUrlStr, userId: userId) {
                     let rewrittenUrl = QueueUrlHelper.updateUrl(queueUrlStr: destinationUrlStr, userId: userId)

@@ -24,10 +24,10 @@ public class QueueItViewManager: NSObject, ObservableObject, WKNavigationDelegat
     var isShowQueueCalled: Bool = false
     
     @MainActor
-    init(queueListener: QueueListener?, options: QueueItEngineOptions, webView: WKWebView?) {
+    init(queueListener: QueueListener?, options: QueueItEngineOptions, webView: WKWebView?, waitingRoomDomain: String? = nil, queuePathPrefix: String? = nil) {
         self.queueListener = queueListener
         self.options = options
-        self.uriOverrider = UriOverrider()
+        self.uriOverrider = UriOverrider(waitingRoomDomain: waitingRoomDomain, queuePathPrefix: queuePathPrefix)
 
         if let webView {
             self.webView = webView
@@ -287,6 +287,29 @@ public class QueueItViewManager: NSObject, ObservableObject, WKNavigationDelegat
         })
         
         presentAlert(alert, from: webView)
+    }
+
+    public func webView(_ webView: WKWebView, 
+                       createWebViewWith configuration: WKWebViewConfiguration, 
+                       for navigationAction: WKNavigationAction, 
+                       windowFeatures: WKWindowFeatures) -> WKWebView? {
+        
+        guard let url = navigationAction.request.url else {
+            QueueItLogger.warn(QueueItViewManager.TAG, "createWebViewWith called without URL")
+            return nil
+        }
+        
+        QueueItLogger.info(QueueItViewManager.TAG, "Handling target='_blank' link: \(url.absoluteString)")
+        
+        let result = self.uriOverrider.handleNavigationRequest(url.absoluteString)
+        
+        if result.action == .openExternal {
+            QueueItLogger.info(QueueItViewManager.TAG, "target='_blank' approved for external opening: \(url.absoluteString)")
+            self.tryOpenExternalUrl(url)
+        } else {
+            QueueItLogger.warn(QueueItViewManager.TAG, "target='_blank' blocked, action was: \(result.action)")
+        }
+        return nil
     }
     
     private func presentAlert(_ alert: UIAlertController, from webView: WKWebView) {
