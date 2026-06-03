@@ -22,6 +22,11 @@ public class QueueItViewManager: NSObject, ObservableObject, WKNavigationDelegat
     private var userId: String?
     
     var isShowQueueCalled: Bool = false
+    // One-shot guard so onQueuePassed is delivered to the listener only once per
+    // queue presentation, even if the URI overrider classifies multiple navigation
+    // steps as `.passed` during the queue-exit redirect chain. Reset in showQueue
+    // so re-presentation works.
+    private var hasFiredQueuePassed: Bool = false
     
     @MainActor
     init(queueListener: QueueListener?, options: QueueItEngineOptions, webView: WKWebView?, waitingRoomDomain: String? = nil, queuePathPrefix: String? = nil) {
@@ -57,6 +62,7 @@ public class QueueItViewManager: NSObject, ObservableObject, WKNavigationDelegat
 
     public func showQueue(_ queueTryPassResult: QueueTryPassResult) {
         isShowQueueCalled = true
+        hasFiredQueuePassed = false
         guard let queueUrl = queueTryPassResult.queueUrl else {
             QueueItLogger.error(QueueItViewManager.TAG, "Cannot show queue, Queue URL is missing.")
             self.queueListener?.onError(QueueError(.invalidResponse), errorMessage: "Missing Queue URL for display")
@@ -160,6 +166,11 @@ public class QueueItViewManager: NSObject, ObservableObject, WKNavigationDelegat
         case .passed:
             QueueItLogger.info(QueueItViewManager.TAG, "Intercept: Queue Passed. Token: \(result.queueItToken ?? "nil")")
             decisionHandler(.cancel, preferences)
+            guard !self.hasFiredQueuePassed else {
+                QueueItLogger.debug(QueueItViewManager.TAG, "Intercept: Queue Passed already fired; suppressing duplicate listener callback.")
+                return
+            }
+            self.hasFiredQueuePassed = true
             self.hideQueue()
             let queuePassedInfo = QueuePassedInfo(queueItToken: result.queueItToken)
             self.queueListener?.onQueuePassed(queuePassedInfo)
