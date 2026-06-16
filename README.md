@@ -30,7 +30,7 @@ If you're building a Swift package, add QueueItKit as a dependency:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.0.1")
+    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.1.0")
 ]
 ```
 
@@ -218,6 +218,33 @@ class MyAppViewModel: ObservableObject, QueueListener {
     func onQueueItUnavailable() { /* Handle queue service unavailable */ }
     func onError(error: QueueError, errorMessage: String) { /* Handle queue errors */ }
     func onWebViewClosed() { /* User closed queue UI */ }
+}
+```
+
+### Invite-only waiting rooms
+
+If your waiting room is configured as invite-only, visitors need to present an invite code (the `code` query parameter on the waiting-room URL). Pass that code to the engine before calling `run()` or `tryPass()`, and the SDK will append it to the queue URL it loads:
+
+```swift
+await engine?.setInviteCode("yeoxhv9fbz")
+await engine?.run()
+```
+
+`setInviteCode` accepts `String?`; passing `nil` or an empty string clears any previously-set code.
+
+#### Capturing the invite code from a deep link
+
+Capturing the code from the link your user opened (Universal Link, custom URL scheme, push payload, manually pasted text, etc.) is the app's responsibility — the SDK only consumes the resulting string. A minimal Universal Link example:
+
+```swift
+.onOpenURL { url in
+    if let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+        .queryItems?
+        .first(where: { $0.name == "code" })?
+        .value,
+       !code.isEmpty {
+        Task { await viewModel.engine?.setInviteCode(code) }
+    }
 }
 ```
 
