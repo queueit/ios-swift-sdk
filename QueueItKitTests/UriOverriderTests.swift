@@ -138,7 +138,7 @@ class UriOverriderTests: XCTestCase {
         testObj.setQueueUrl(TEST_QUEUE_URL_HTTP) // "https://customer.queue-it.net/app/enqueue"
         testObj.setTargetUrl("http://localhost:3000")
         testObj.setUserId("myuser1")
-        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.1"
+        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.1.0"
 
         let result = testObj.handleNavigationRequest(destinationUrl)
 
@@ -153,8 +153,8 @@ class UriOverriderTests: XCTestCase {
         testObj.setQueueUrl(TEST_QUEUE_URL_HTTP) // "https://customer.queue-it.net/app/enqueue"
         testObj.setTargetUrl("http://localhost:3000")
         testObj.setUserId("myuser1")
-        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.1"
-        let expectedRewrittenUrlContains = "http://customer.queue-it.net/exitline.aspx?userId=myuser1&c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.0.1" // Order of query items might vary
+        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.1.0"
+        let expectedRewrittenUrlContains = "http://customer.queue-it.net/exitline.aspx?userId=myuser1&c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.1.0" // Order of query items might vary
 
         let result = testObj.handleNavigationRequest(destinationUrl)
         XCTAssertEqual(result.action, .loadInWebview)

@@ -11,11 +11,12 @@ actor QueueItWaitingRoomProvider {
     
     var isRequestInProgress = false
     let apiClient: QueueItApiClientProtocol
-    
+
     private let customerId: String
     private let waitingRoomOrAliasId: String
     private let themeName: String?
     private let language: String?
+    private var inviteCode: String?
 
     init(customerId: String, waitingRoomOrAliasId: String, themeName: String?, language: String? ,waitingRoomDomain: String? = nil, queuePathPrefix: String? = nil, apiClient: QueueItApiClientProtocol? = nil) {
         self.customerId = customerId
@@ -44,6 +45,10 @@ actor QueueItWaitingRoomProvider {
 
     public func getIsRequestInProgress() -> Bool {
         return isRequestInProgress
+    }
+
+    func setInviteCode(_ inviteCode: String?) {
+        self.inviteCode = (inviteCode?.isEmpty == true) ? nil : inviteCode
     }
 
     func tryEnqueue(enqueueToken: String?, enqueueKey: String?) async -> TryEnqueueResult {
@@ -144,8 +149,8 @@ actor QueueItWaitingRoomProvider {
         let isPassedThrough = queueItToken != nil && !(queueItToken?.isEmpty ?? true)
         let redirectType = self.getRedirectTypeFromToken(queueItToken)
 
-        let updatedQueueUrl = (queueUrl != nil && QueueUrlHelper.isUrlUpdateNeeded(queueUrlStr: queueUrl, userId: userId))
-        ? QueueUrlHelper.updateUrl(queueUrlStr: queueUrl, userId: userId)
+        let updatedQueueUrl = (queueUrl != nil && QueueUrlHelper.isUrlUpdateNeeded(queueUrlStr: queueUrl, userId: userId, inviteCode: inviteCode))
+        ? QueueUrlHelper.updateUrl(queueUrlStr: queueUrl, userId: userId, inviteCode: inviteCode)
             : queueUrl
 
         let result = QueueTryPassResult(

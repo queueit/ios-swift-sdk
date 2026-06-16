@@ -29,7 +29,7 @@ Using `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.0.1")
+    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.1.0")
 ]
 ```
 

@@ -42,6 +42,10 @@ public class QueueItEngine {
         return VersionManager.sdkVersion
     }
 
+    public func setInviteCode(_ inviteCode: String?) async {
+        await self.provider.setInviteCode(inviteCode)
+    }
+
     public func run() async {
         QueueItLogger.debug(QueueItEngine.TAG, "run() called")
         await self.runWithConnection(enqueueToken: nil, enqueueKey: nil)
