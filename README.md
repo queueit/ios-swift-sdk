@@ -226,7 +226,7 @@ class MyAppViewModel: ObservableObject, QueueListener {
 If your waiting room is configured as invite-only, visitors need to present an invite code (the `code` query parameter on the waiting-room URL). Pass that code to the engine before calling `run()` or `tryPass()`, and the SDK will append it to the queue URL it loads:
 
 ```swift
-await engine?.setInviteCode("yeoxhv9fbz")
+await engine?.setInviteCode("<your-invite-code>")
 await engine?.run()
 ```
 
