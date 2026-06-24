@@ -5,6 +5,7 @@ class MockListener: QueueListener {
     var expectation: XCTestExpectation?
 
     var onQueuePassedCalled = false
+    var onQueuePassedCallCount = 0
     var lastQueuePassedInfo: QueuePassedInfo?
 
     var onQueueDisabledCalled = false
@@ -23,6 +24,7 @@ class MockListener: QueueListener {
 
     func onQueuePassed(_ info: QueuePassedInfo) {
         onQueuePassedCalled = true
+        onQueuePassedCallCount += 1
         lastQueuePassedInfo = info
         expectation?.fulfill()
     }
