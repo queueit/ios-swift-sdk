@@ -65,14 +65,14 @@ To initialize the Queue-it engine, you need to provide:
 
 Optional parameters include `themeName`, `language`, `options`, `webView`, `waitingRoomDomain`, and `queuePathPrefix`.
 
-### Usage Patterns
+### Usage Pattern
 
-QueueItKit provides two main approaches:
+Integrate in two steps:
 
-- **`run()`** - Starts the queue flow immediately and shows the WebView if queuing is required
-- **`tryPass()`** + **`showQueue()`** - Checks queue status first, then optionally shows the WebView based on the result
+1. **`tryPass()`** checks the status of the waiting room and returns a ``QueueTryPassResult``, without showing any UI. Use `tryPass(enqueueToken:)` or `tryPass(enqueueKey:)` for token or key protected waiting rooms.
+2. **`showQueue(queueTryPassResult:)`** presents the waiting room in the WebView when the result's `redirectType` is `.queue`. When the visitor's turn comes, `onQueuePassed(_:)` is called with the `queueItToken`. For any other result (passed through, or a disabled, idle or after-event waiting room) it shows no UI and calls `onQueuePassed(_:)` with the result's `queueItToken`; check `redirectType` if you need to tell them apart.
 
-The `tryPass()` approach gives you more control over when to display the queue UI.
+Between the two calls you can change the queue URL, for example to add an invite code, by passing a new ``QueueTryPassResult`` with the updated `queueUrl` to `showQueue(queueTryPassResult:)`.
 
 ### Basic Example
 
@@ -89,16 +89,27 @@ class MyViewModel: ObservableObject, QueueListener {
         )
         manager = engine?.viewManager
     }
+
+    @MainActor func enterProtectedArea() {
+        Task {
+            // nil: the request failed (see onError / onQueueItUnavailable)
+            guard let result = await engine?.tryPass() else { return }
+            // Shows the waiting room when redirectType is .queue; otherwise calls
+            // onQueuePassed(_:) when the result has a queueItToken
+            // (passed through, or a disabled, idle or after-event waiting room)
+            engine?.showQueue(queueTryPassResult: result)
+        }
+    }
     
-    func onQueuePassed(info: QueuePassedInfo) {
-        // Store token: info.queueItToken
-        manager?.hideQueue()
+    func onQueuePassed(_ queuePassedInfo: QueuePassedInfo) {
+        // Store token: queuePassedInfo.queueItToken
+        Task { @MainActor in self.manager?.hideQueue() }
     }
     
     func onQueueViewWillOpen() { }
-    func onQueueDisabled(info: QueueDisabledInfo) { }
+    func onQueueDisabled(_ queueDisabledInfo: QueueDisabledInfo) { }
     func onQueueItUnavailable() { }
-    func onError(error: QueueError, errorMessage: String) { }
+    func onError(_ error: QueueError, errorMessage: String) { }
 }
 ```
 

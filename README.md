@@ -58,7 +58,7 @@ Download pre-compiled XCFramework binaries from [GitHub Releases](https://github
 
 As the App developer, you must manage the state (whether the user was previously queued up or not) inside the app's storage.
 
-After you have received the `onQueuePassed` callback, the app must remember to keep the state, possibly with a date/time expiration. When the user wants to navigate to specific screens on the app which needs Queue-it protection, your code check this state/variable, and only call SDK methods in the case where the user did not previously queue up.
+After you have received the `onQueuePassed` callback, the app must remember to keep the state, possibly with a date/time expiration. When the user wants to navigate to specific screens on the app which needs Queue-it protection, your code checks this state/variable, and only call SDK methods in the case where the user did not previously queue up.
 
 Please note that when the user clicks back to navigate back to a protected screen, the same check needs to be done.
 
@@ -80,7 +80,7 @@ QueueListener enables your application to:
 #### Required Methods
 * onQueuePassed(_:) - Called when the user has successfully passed the queue. Use this to retrieve and store the queueItToken.
 * onQueueViewWillOpen() - Triggered just before the queue WebView opens.
-* onQueueDisabled(_:) - Indicates that the queue is in 'disabled' state.
+* onQueueDisabled(_:) - Indicates that the queue is in 'disabled' state. Not raised on the `tryPass()` + `showQueue(queueTryPassResult:)` path: a disabled, idle or after-event waiting room is returned by `tryPass()` with a `queueItToken`, and `showQueue(queueTryPassResult:)` reports it through `onQueuePassed(_:)`. Check the result's `redirectType` if you need to tell them apart.
 * onQueueItUnavailable() - Called when Queue‑it services cannot be reached.
 * onError(_:errorMessage:) - Called when the SDK encounters errors (e.g., network issues or invalid configs).
 
@@ -150,7 +150,7 @@ QueueItEngine(
 #### Example of building an engine (SwiftUI)
 ```swift
 class MyAppViewModel: ObservableObject, QueueListener {
-    private var engine: QueueItEngine?
+    private(set) var engine: QueueItEngine?
     @Published var manager: QueueItViewManager?
 
     @Published var showWebView: Bool = false
@@ -168,26 +168,32 @@ class MyAppViewModel: ObservableObject, QueueListener {
             .store(in: &cancellables)
     }
 
-    func onQueuePassed(info: QueuePassedInfo) {
+    func onQueuePassed(_ queuePassedInfo: QueuePassedInfo) {
         let token = queuePassedInfo.queueItToken
-        manager?.hideQueue()
+        Task { @MainActor in self.manager?.hideQueue() }
     }
 
     func onQueueViewWillOpen() { /* Show loading indicator */ }
-    func onQueueDisabled(info: QueueDisabledInfo) { /* Handle queue disabled */ }
+    func onQueueDisabled(_ queueDisabledInfo: QueueDisabledInfo) { /* Handle queue disabled */ }
     func onQueueItUnavailable() { /* Handle queue service unavailable */ }
-    func onError(error: QueueError, errorMessage: String) { /* Handle queue errors */ }
+    func onError(_ error: QueueError, errorMessage: String) { /* Handle queue errors */ }
     func onWebViewClosed() { /* User closed queue UI */ }
 }
 ```
 
 #### Example of building an engine (UIKit)
+`WebViewControlDelegate` is a protocol in your app (not part of QueueItKit) that your view controller implements to present and dismiss the WebView:
 ```swift
+@MainActor protocol WebViewControlDelegate: AnyObject {
+    func presentWebView()
+    func dismissWebView()
+}
+
 class MyAppViewModel: ObservableObject, QueueListener {
 
     var engine: QueueItEngine?
     var manager: QueueItViewManager?
-    var delegate: WebViewControlDelegate?
+    weak var delegate: WebViewControlDelegate?
     
     private var cancellables = Set<AnyCancellable>()
     
@@ -208,26 +214,127 @@ class MyAppViewModel: ObservableObject, QueueListener {
             .store(in: &cancellables)
     }
     
-    func onQueuePassed(info: QueuePassedInfo) {
+    func onQueuePassed(_ queuePassedInfo: QueuePassedInfo) {
         let token = queuePassedInfo.queueItToken
-        manager?.hideQueue()
+        Task { @MainActor in self.manager?.hideQueue() }
     }
 
     func onQueueViewWillOpen() { /* Show loading indicator */ }
-    func onQueueDisabled(info: QueueDisabledInfo) { /* Handle queue disabled */ }
+    func onQueueDisabled(_ queueDisabledInfo: QueueDisabledInfo) { /* Handle queue disabled */ }
     func onQueueItUnavailable() { /* Handle queue service unavailable */ }
-    func onError(error: QueueError, errorMessage: String) { /* Handle queue errors */ }
+    func onError(_ error: QueueError, errorMessage: String) { /* Handle queue errors */ }
     func onWebViewClosed() { /* User closed queue UI */ }
 }
 ```
 
+### Integration flow: tryPass() and showQueue()
+
+The integration has two steps:
+
+1.  `tryPass()` asks Queue-it for the status of the waiting room and returns a `QueueTryPassResult`, without showing any UI.
+2.  If the result's `redirectType` is `.queue`, call `showQueue(queueTryPassResult:)` to present the waiting room in the WebView. When it is the visitor's turn, `onQueuePassed(_:)` is called with the `queueItToken`.
+
+Because these are two separate calls, your app decides in which layer each step happens, and can change the queue URL before the waiting room is shown (see [Modify the queue URL before showing the waiting room](#modify-the-queue-url-before-showing-the-waiting-room)).
+
+```mermaid
+flowchart TD
+    start([User opens a protected screen]) --> hasPass{Valid Queue-it pass<br/>stored by the app?}
+    hasPass -- Yes --> show[Show the protected screen]
+    hasPass -- No --> tryPass["engine.tryPass()"]
+    tryPass -- "Request failed (nil)" --> failed[Decide: let the user in<br/>or try again later]
+    tryPass -- QueueTryPassResult --> result{redirectType}
+    result -- "Not .queue: .safetyNet, .disabled,<br/>.idle, .afterEvent (queueItToken)" --> store[Store the pass<br/>with an expiry]
+    result -- .queue --> modify["Optional: modify the queue URL<br/>(e.g. add an invite code)"]
+    modify --> showQueue["engine.showQueue(queueTryPassResult:)"]
+    showQueue --> wr[[Waiting room in WebView]]
+    wr -- "onQueuePassed(_:) (queueItToken)" --> store
+    wr -- "onSessionRestart()" --> tryPass
+    wr -- "onWebViewClosed() or onError" --> back[Go back]
+    store --> show
+```
+
+#### tryPass()
+
+`tryPass` has three variants: no arguments, with an enqueue token (`tryPass(enqueueToken:)`), or with an enqueue key (`tryPass(enqueueKey:)`). It returns `nil` if the request fails. The SDK has then called `onError(_:errorMessage:)` (e.g. no connection) or `onQueueItUnavailable()` on your `QueueListener`. No callback is made if another `tryPass()` request is already in progress.
+
+```swift
+@MainActor func enterProtectedArea() {
+    createEngine()
+    Task {
+        let result: QueueTryPassResult?
+        if !enqueueToken.isEmpty {
+            result = await engine?.tryPass(enqueueToken: enqueueToken)
+        } else if !enqueueKey.isEmpty {
+            result = await engine?.tryPass(enqueueKey: enqueueKey)
+        } else {
+            result = await engine?.tryPass()
+        }
+        guard let result else { return } // Request failed: see onError / onQueueItUnavailable
+
+        switch result.redirectType {
+        case .queue:
+            showQueue(result)
+        case .disabled, .idle, .afterEvent:
+            // Waiting room not active: continue (result.queueItToken is set)
+            break
+        default:
+            // Passed through (e.g. safety net): store result.queueItToken and continue
+            break
+        }
+    }
+}
+```
+
+#### showQueue()
+
+```swift
+@MainActor func showQueue(_ result: QueueTryPassResult) {
+    engine?.showQueue(queueTryPassResult: result)
+}
+```
+
+`showQueue(queueTryPassResult:)` only opens the WebView when the result's `redirectType` is `.queue` and it has a `queueUrl`. For any other result it does not show the waiting room: if the result carries a `queueItToken` (`isPassedThrough`), it calls `onQueuePassed(_:)`. This includes disabled, idle and after-event waiting rooms, so check the result's `redirectType` if you need to tell them apart.
+
+### Modify the queue URL before showing the waiting room
+
+Between `tryPass()` and `showQueue(queueTryPassResult:)` you can change the queue URL that the WebView loads, for example to add an invite-only `code` or other query parameters.
+
+`QueueTryPassResult` is read-only, so build a new result with the same values and the updated `queueUrl`, and pass that to `showQueue(queueTryPassResult:)`. The SDK loads the URL as given.
+
+```swift
+func addingQueryItems(_ items: [URLQueryItem], to result: QueueTryPassResult) -> QueueTryPassResult {
+    guard let queueUrl = result.queueUrl,
+          var components = URLComponents(string: queueUrl) else { return result }
+    components.queryItems = (components.queryItems ?? []) + items
+
+    return QueueTryPassResult(
+        queueItToken: result.queueItToken,
+        queueUrl: components.string,
+        targetUrl: result.targetUrl,
+        isPassedThrough: result.isPassedThrough,
+        redirectType: result.redirectType,
+        urlTTLInMinutes: result.urlTTLInMinutes
+    )
+}
+
+// After tryPass(), e.g. to add an invite code received after the check:
+if result.redirectType == .queue {
+    let updated = addingQueryItems([URLQueryItem(name: "code", value: inviteCode)], to: result)
+    engine?.showQueue(queueTryPassResult: updated)
+}
+```
+
+> **Note:** Only add or change query parameters, and keep the existing ones (the SDK adds its own). Do not change the scheme, host or path: the SDK uses the queue URL's host (and, behind your CDN, `queuePathPrefix`) to decide which navigations stay in the WebView.
+
+For invite codes, `setInviteCode(_:)` is the built-in option (see [Invite-only waiting rooms](#invite-only-waiting-rooms)): the SDK adds the `code` parameter to the queue URL returned by `tryPass()`. Modify the URL yourself only when you need other changes, or when the code is only known after `tryPass()` has returned. Don't add a `code` parameter yourself if you have already called `setInviteCode(_:)`.
+
 ### Invite-only waiting rooms
 
-If your waiting room is configured as invite-only, visitors need to present an invite code (the `code` query parameter on the waiting-room URL). Pass that code to the engine before calling `run()` or `tryPass()`, and the SDK will append it to the queue URL it loads:
+If your waiting room is configured as invite-only, visitors need to present an invite code (the `code` query parameter on the waiting-room URL). Pass that code to the engine before calling `tryPass()`, and the SDK will append it to the queue URL in the result:
 
 ```swift
 await engine?.setInviteCode("<your-invite-code>")
-await engine?.run()
+let result = await engine?.tryPass()
 ```
 
 `setInviteCode` accepts `String?`; passing `nil` or an empty string clears any previously-set code.
@@ -247,56 +354,6 @@ Capturing the code from the link your user opened (Universal Link, custom URL sc
     }
 }
 ```
-
-### Usage Overview: Separating run(), tryPass(), and showQueue()
-
-*   run(): Starts the normal queue flow immediately.
-*   tryPass(): Asks Queue‑it to get status of a waiting room it returns a QueueTryPassResult that you can decide on. If there is no queue situation a queueItToken will be return.
-*   showQueue(): If the latest tryPass() result indicates .queue as redirectType, call showQueue() to present the WebView/UI for the waiting room.
-
-#### run()
-```swift
-@MainActor func run() {
-    createEngine()
-    Task {
-        if enqueueToken != "" {
-            await engine?.runWithEnqueueToken(enqueueToken)
-        } else if enqueueKey != "" {
-            await engine?.runWithEnqueueKey(enqueueKey)
-        } else {
-            await engine?.run()
-        }
-    }
-}
-```
-
-#### tryPass()
-```swift
-@MainActor func tryPass() {
-    createEngine()
-    Task {
-        if enqueueToken != "" {
-            tryPassResult = await engine?.tryPass(enqueueToken: enqueueToken)
-        } else if enqueueKey != "" {
-            tryPassResult = await engine?.tryPass(enqueueKey: enqueueKey)
-        } else {
-            tryPassResult = await engine?.tryPass()
-        }
-    }
-}
-```
-
-#### showQueue()
-```swift
-@MainActor func showQueue() {
-    if let tryPassResult, tryPassResult.redirectType == .queue {
-        engine?.showQueue(queueTryPassResult: tryPassResult)
-        self.tryPassResult = nil
-    }
-}
-```
-
->   This separation gives you explicit control: run the queue now, or pre-check using tryPass() and only show the UI when actually needed.
 
 ### Debugging with QueueItLogger
 
@@ -356,10 +413,11 @@ engine = QueueItEngine(
 
     ```swift
     import SwiftUI
+    import Combine
     import QueueItKit
 
     class MyAppViewModel: ObservableObject, QueueListener {
-        private var engine: QueueItEngine?
+        private(set) var engine: QueueItEngine?
         @Published var manager: QueueItViewManager?
 
         @Published var showWebView: Bool = false // Controls SwiftUI WKWebView presentation
@@ -381,49 +439,37 @@ engine = QueueItEngine(
                 .store(in: &cancellables)
         }
         
-        @MainActor func run() {
+        // 1. Check the waiting room status. 2. Show the waiting room if needed.
+        @MainActor func enterProtectedArea() {
             createEngine()
             Task {
-                if enqueueToken != "" {
-                    await engine?.runWithEnqueueToken(enqueueToken)
-                } else if enqueueKey != "" {
-                    await engine?.runWithEnqueueKey(enqueueKey)
+                let result: QueueTryPassResult?
+                if !enqueueToken.isEmpty {
+                    result = await engine?.tryPass(enqueueToken: enqueueToken)
+                } else if !enqueueKey.isEmpty {
+                    result = await engine?.tryPass(enqueueKey: enqueueKey)
                 } else {
-                    await engine?.run()
+                    result = await engine?.tryPass()
                 }
-            }
-        }
-        
-        @MainActor func tryPass() {
-            createEngine()
-            Task {
-                if enqueueToken != "" {
-                    tryPassResult = await engine?.tryPass(enqueueToken: enqueueToken)
-                } else if enqueueKey != "" {
-                    tryPassResult = await engine?.tryPass(enqueueKey: enqueueKey)
-                } else {
-                    tryPassResult = await engine?.tryPass()
-                }
-            }
-        }
-        
-        @MainActor func showQueue() {
-            if let tryPassResult, tryPassResult.redirectType == .queue {
-                engine?.showQueue(queueTryPassResult: tryPassResult)
-                self.tryPassResult = nil
+                guard let result else { return } // Request failed: see onError / onQueueItUnavailable
+
+                // Shows the waiting room when redirectType is .queue; otherwise calls
+                // onQueuePassed(_:) when the result has a queueItToken (passed through,
+                // or a disabled, idle or after-event waiting room)
+                engine?.showQueue(queueTryPassResult: result)
             }
         }
 
         // MARK: - QueueListener Conformance
-        func onQueuePassed(info: QueuePassedInfo) {
+        func onQueuePassed(_ queuePassedInfo: QueuePassedInfo) {
             let token = queuePassedInfo.queueItToken
-            manager?.hideQueue()
+            Task { @MainActor in self.manager?.hideQueue() }
         }
 
         func onQueueViewWillOpen() { /* Show loading indicator */ }
-        func onQueueDisabled(info: QueueDisabledInfo) { /* Handle queue disabled */ }
+        func onQueueDisabled(_ queueDisabledInfo: QueueDisabledInfo) { /* Handle queue disabled */ }
         func onQueueItUnavailable() { /* Handle queue service unavailable */ }
-        func onError(error: QueueError, errorMessage: String) { /* Handle queue errors */ }
+        func onError(_ error: QueueError, errorMessage: String) { /* Handle queue errors */ }
         func onWebViewClosed() { /* User closed queue UI */ }
     }
     ```
@@ -469,16 +515,8 @@ engine = QueueItEngine(
         
         private var content: some View {
             VStack(spacing: 20) {
-                Button("Run") {
-                    viewModel.run()
-                }
-                
-                Button("Run(TryPass)") {
-                    viewModel.tryPass()
-                }
-
-                Button("Show Queue(After TryPass)") {
-                    viewModel.showQueue()
+                Button("Enter") {
+                    viewModel.enterProtectedArea()
                 }
             }
         }
@@ -495,14 +533,23 @@ engine = QueueItEngine(
 1.  The core logic for interacting with Queue-it is typically handled by a `ViewModel`.
 
     ```swift
+    import Foundation
+    import Combine
+    import QueueItKit
+
+    // Defined in your app: implemented by the view controller that presents the WebView
+    @MainActor protocol WebViewControlDelegate: AnyObject {
+        func presentWebView()
+        func dismissWebView()
+    }
+
     class MyAppViewModel: ObservableObject, QueueListener {
 
         var engine: QueueItEngine?
         var manager: QueueItViewManager?
-        var delegate: WebViewControlDelegate?
+        weak var delegate: WebViewControlDelegate?
         
         private var cancellables = Set<AnyCancellable>()
-        private var tryPassResult: QueueTryPassResult?
         
         init() {
             QueueItLogger.setLogLevel(.debug)
@@ -526,49 +573,37 @@ engine = QueueItEngine(
                 .store(in: &cancellables)
         }
         
-        @MainActor func run() {
+        // 1. Check the waiting room status. 2. Show the waiting room if needed.
+        @MainActor func enterProtectedArea() {
             createEngine()
             Task {
-                if enqueueToken != "" {
-                    await engine?.runWithEnqueueToken(enqueueToken)
-                } else if enqueueKey != "" {
-                    await engine?.runWithEnqueueKey(enqueueKey)
+                let result: QueueTryPassResult?
+                if !enqueueToken.isEmpty {
+                    result = await engine?.tryPass(enqueueToken: enqueueToken)
+                } else if !enqueueKey.isEmpty {
+                    result = await engine?.tryPass(enqueueKey: enqueueKey)
                 } else {
-                    await engine?.run()
+                    result = await engine?.tryPass()
                 }
-            }
-        }
-        
-        @MainActor func tryPass() {
-            createEngine()
-            Task {
-                if enqueueToken != "" {
-                    tryPassResult = await engine?.tryPass(enqueueToken: enqueueToken)
-                } else if enqueueKey != "" {
-                    tryPassResult = await engine?.tryPass(enqueueKey: enqueueKey)
-                } else {
-                    tryPassResult = await engine?.tryPass()
-                }
-            }
-        }
-        
-        @MainActor func showQueue() {
-            if let tryPassResult, tryPassResult.redirectType == .queue {
-                engine?.showQueue(queueTryPassResult: tryPassResult)
-                self.tryPassResult = nil
+                guard let result else { return } // Request failed: see onError / onQueueItUnavailable
+
+                // Shows the waiting room when redirectType is .queue; otherwise calls
+                // onQueuePassed(_:) when the result has a queueItToken (passed through,
+                // or a disabled, idle or after-event waiting room)
+                engine?.showQueue(queueTryPassResult: result)
             }
         }
         
         // MARK: - QueueListener Conformance
-        func onQueuePassed(info: QueuePassedInfo) {
+        func onQueuePassed(_ queuePassedInfo: QueuePassedInfo) {
             let token = queuePassedInfo.queueItToken
-            manager?.hideQueue()
+            Task { @MainActor in self.manager?.hideQueue() }
         }
 
         func onQueueViewWillOpen() { /* Show loading indicator */ }
-        func onQueueDisabled(info: QueueDisabledInfo) { /* Handle queue disabled */ }
+        func onQueueDisabled(_ queueDisabledInfo: QueueDisabledInfo) { /* Handle queue disabled */ }
         func onQueueItUnavailable() { /* Handle queue service unavailable */ }
-        func onError(error: QueueError, errorMessage: String) { /* Handle queue errors */ }
+        func onError(_ error: QueueError, errorMessage: String) { /* Handle queue errors */ }
         func onWebViewClosed() { /* User closed queue UI */ }
     }
     ```
@@ -599,7 +634,7 @@ engine = QueueItEngine(
         
         private var presentedWebVC: UIViewController?
         
-        private let viewModel = ApiDemoViewModel()
+        private let viewModel = MyAppViewModel()
         private var cancellables = Set<AnyCancellable>()
         
         override func viewDidLoad() {
@@ -607,16 +642,8 @@ engine = QueueItEngine(
             viewModel.delegate = self
         }
         
-        @IBAction func run(_ sender: Any) {
-            viewModel.run()
-        }
-        
-        @IBAction func runTryPass(_ sender: Any) {
-            viewModel.tryPass()
-        }
-        
-        @IBAction func showQueue(_ sender: Any) {
-            viewModel.showQueue()
+        @IBAction func enter(_ sender: Any) {
+            viewModel.enterProtectedArea()
         }
         
         func presentWebView() {
@@ -667,10 +694,44 @@ The integration can be described in the following steps:
 3. Scenario 1, user should not be queued (response does not have the `x-queueit-redirect` header)
     1. We store the Queue-it cookies from the response, to include in later API calls
 4. Scenario 2, user should be queued
-    1. If the user should be queued we'll get a `200 Ok` response with a `x-queueit-redirect` header. We need to extract the `c`(Customer ID) and `e` (Waiting Room ID) query string parameters from the `x-queueit-redirect` header and create a `QueueItEngine` with them, then call `run()`, just as you would normally do with the SDK
-    2. We wait for the `onQueuePassed` callback and we store the QueueItToken passed to the callback
+    1. If the user should be queued we'll get a `200 Ok` response with a `x-queueit-redirect` header. We need to extract the `c`(Customer ID) and `e` (Waiting Room ID) query string parameters from the `x-queueit-redirect` header and create a `QueueItEngine` with them, then call `tryPass()` and `showQueue(queueTryPassResult:)`, just as you would normally do with the SDK (see [Integration flow](#integration-flow-trypass-and-showqueue))
+    2. We wait for the `onQueuePassed` callback and we store the QueueItToken passed to the callback. If the `tryPass()` result's `redirectType` is not `.queue`, the QueueItToken is already in the result's `queueItToken`
     3. We can repeat the API request, this time appending the `queueittoken={QueueItToken}` query string parameter, to prevent the server-side connector from intercepting the call again
     4. We store the Queue-it cookies from the final response, so they can be set in other API calls
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant API as Your API (Queue-it connector)
+    participant SDK as Queue-it SDK
+    participant WR as Waiting room (WebView)
+
+    App->>API: Request with x-queueit-ajaxpageurl header<br/>(+ Queue-it cookie, if stored)
+    alt No x-queueit-redirect header
+        API-->>App: API response
+        App->>App: Store the Queue-it cookies
+    else x-queueit-redirect header
+        API-->>App: 200 OK with x-queueit-redirect
+        App->>App: Extract c (customer ID) and e (waiting room ID)
+        App->>SDK: QueueItEngine(customerId: c, waitingRoomOrAliasId: e)
+        App->>SDK: engine.tryPass()
+        SDK-->>App: QueueTryPassResult
+        alt redirectType is not .queue (.safetyNet, .disabled, .idle, .afterEvent)
+            Note over App,SDK: queueItToken is in the result
+        else redirectType is .queue
+            opt Modify the queue URL (e.g. add an invite code)
+                App->>App: Build a result with the updated queue URL
+            end
+            App->>SDK: engine.showQueue(queueTryPassResult:)
+            SDK->>WR: Open the waiting room
+            WR-->>SDK: User's turn
+            SDK-->>App: onQueuePassed(queueItToken)
+        end
+        App->>API: Repeat the request with ?queueittoken=...
+        API-->>App: API response + Queue-it cookies
+        App->>App: Store the Queue-it cookies
+    end
+```
 
 ### Client-side and server-side mobile integration (hybrid) with Queue-it Bring Your Own CDN
 
@@ -678,7 +739,7 @@ The integration can be described in the following steps:
 
 > If you are only using client-side protection, using the Mobile SDK, refer to the [How to use the library](#how-to-use-the-library) section above.
 
-If you are running Queue-it behind your own reverse proxy the Mobile Integration can also be setup to run behind your proxy. For the hybrid setup, your KnownUser connector will also need to run in "Bring Your Own CDN" mode. Please contract Queue-it Support, for any questions the KnownUser Connector Bring Your Own CDN Setup.
+If you are running Queue-it behind your own reverse proxy the Mobile Integration can also be setup to run behind your proxy. For the hybrid setup, your KnownUser connector will also need to run in "Bring Your Own CDN" mode. Please contact Queue-it Support, for any questions the KnownUser Connector Bring Your Own CDN Setup.
 
 #### Setup Mobile SDK with Bring Your Own CDN, with protected API
 
