@@ -65,6 +65,29 @@ class UriOverrider {
         return queuePathPrefix.trimmingCharacters(in: slashSet)
     }
 
+    func isExitLink(_ destinationUrlStr: String) -> Bool {
+        guard let url = URL(string: destinationUrlStr),
+              let queueHost = self.queueHost,
+              url.host?.lowercased() == queueHost else {
+            return false
+        }
+
+        var path = url.path.lowercased()
+        if isBehindProxy(), let queuePathPrefix {
+            let sanitizedPrefix = sanitizeQueuePathPrefix(queuePathPrefix).lowercased()
+            if !sanitizedPrefix.isEmpty {
+                let prefix = "/" + sanitizedPrefix
+                guard path.hasPrefix(prefix) else { return false }
+                path = String(path.dropFirst(prefix.count))
+            }
+        }
+
+        if path.hasSuffix("/cancelqueueid") {
+            return false
+        }
+        return path == "/cancel.aspx" || path.hasPrefix("/cancel/")
+    }
+
     func handleNavigationRequest(_ destinationUrlStr: String) -> UriOverrideResponse {
         QueueItLogger.debug(UriOverrider.TAG, "Intercepting: \(destinationUrlStr)")
         

@@ -138,7 +138,7 @@ class UriOverriderTests: XCTestCase {
         testObj.setQueueUrl(TEST_QUEUE_URL_HTTP) // "https://customer.queue-it.net/app/enqueue"
         testObj.setTargetUrl("http://localhost:3000")
         testObj.setUserId("myuser1")
-        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.1.0"
+        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.2.0"
 
         let result = testObj.handleNavigationRequest(destinationUrl)
 
@@ -153,8 +153,8 @@ class UriOverriderTests: XCTestCase {
         testObj.setQueueUrl(TEST_QUEUE_URL_HTTP) // "https://customer.queue-it.net/app/enqueue"
         testObj.setTargetUrl("http://localhost:3000")
         testObj.setUserId("myuser1")
-        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.1.0"
-        let expectedRewrittenUrlContains = "http://customer.queue-it.net/exitline.aspx?userId=myuser1&c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.1.0" // Order of query items might vary
+        let destinationUrl = "http://customer.queue-it.net/exitline.aspx?c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.2.0"
+        let expectedRewrittenUrlContains = "http://customer.queue-it.net/exitline.aspx?userId=myuser1&c=customer&e=otherroom2&q=qid&cid=en-US&l=myLayout&sdkv=iOS-Swift-1.2.0" // Order of query items might vary
 
         let result = testObj.handleNavigationRequest(destinationUrl)
         XCTAssertEqual(result.action, .loadInWebview)
@@ -261,5 +261,44 @@ class UriOverriderTests: XCTestCase {
         
         XCTAssertEqual(result.action, .loadInWebview)
     }
-}
 
+    func testGivenCancelAddresses_WhenIsExitLink_ThenTrueIgnoringCase() {
+        testObj.setQueueUrl(TEST_QUEUE_URL_HTTP)
+
+        XCTAssertTrue(testObj.isExitLink("https://customer.queue-it.net/cancel.aspx?c=c"))
+        XCTAssertTrue(testObj.isExitLink("https://customer.queue-it.net/cancel/c/e"))
+        XCTAssertTrue(testObj.isExitLink("https://customer.queue-it.net/cancel/c/e/q"))
+        XCTAssertTrue(testObj.isExitLink("https://CUSTOMER.queue-it.net/Cancel.ASPX"))
+    }
+
+    func testGivenOtherAddresses_WhenIsExitLink_ThenFalse() {
+        testObj.setQueueUrl(TEST_QUEUE_URL_HTTP)
+
+        XCTAssertFalse(testObj.isExitLink("https://customer.queue-it.net/cancel/c/e/cancelqueueid"))
+        XCTAssertFalse(testObj.isExitLink("https://customer.queue-it.net/cancelqueueid"))
+        XCTAssertFalse(testObj.isExitLink("https://customer.queue-it.net/exitline.aspx"))
+        XCTAssertFalse(testObj.isExitLink("https://customer.queue-it.net/app/enqueue"))
+        XCTAssertFalse(testObj.isExitLink("https://other.example.com/cancel.aspx"))
+    }
+
+    func testGivenSlashOnlyPrefix_WhenIsExitLink_ThenCancelAddressMatches() {
+        for prefix in ["/", " / "] {
+            let behindProxy = UriOverrider(waitingRoomDomain: "queue.mydomain.com", queuePathPrefix: prefix)
+            behindProxy.setQueueUrl("https://queue.mydomain.com/app/enqueue")
+
+            XCTAssertTrue(behindProxy.isExitLink("https://queue.mydomain.com/cancel.aspx"), prefix)
+            XCTAssertTrue(behindProxy.isExitLink("https://queue.mydomain.com/cancel/c/e/q"), prefix)
+            XCTAssertFalse(behindProxy.isExitLink("https://queue.mydomain.com/cancel/c/e/cancelqueueid"), prefix)
+        }
+    }
+
+    func testGivenBehindProxyPrefix_WhenIsExitLink_ThenPathCheckedAfterPrefix() {
+        let behindProxy = UriOverrider(waitingRoomDomain: "queue.mydomain.com", queuePathPrefix: "/queue/")
+        behindProxy.setQueueUrl("https://queue.mydomain.com/queue/app/enqueue")
+
+        XCTAssertTrue(behindProxy.isExitLink("https://queue.mydomain.com/queue/cancel/c/e/q"))
+        XCTAssertTrue(behindProxy.isExitLink("https://queue.mydomain.com/queue/cancel.aspx"))
+        XCTAssertFalse(behindProxy.isExitLink("https://queue.mydomain.com/cancel/c/e/q"))
+        XCTAssertFalse(behindProxy.isExitLink("https://queue.mydomain.com/queue/cancel/c/e/cancelqueueid"))
+    }
+}

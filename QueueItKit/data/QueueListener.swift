@@ -11,6 +11,7 @@ public protocol QueueListener: AnyObject {
     func onSessionRestart()
     func onQueueUrlChanged(_ url: String)
     func onSSLError(_ errorMessage: String)
+    func onUserExited()
 }
 
 public extension QueueListener {
@@ -18,4 +19,5 @@ public extension QueueListener {
     func onSessionRestart() {}
     func onQueueUrlChanged(_ url: String) {}
     func onSSLError(_ errorMessage: String) {}
+    func onUserExited() {}
 }

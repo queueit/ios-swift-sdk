@@ -159,6 +159,69 @@ final class QueueItWaitingRoomProviderTests: XCTestCase {
         XCTAssertFalse(isInProgress)
     }
     
+    func testGivenEveryAttemptFailsNotConnected_WhenTryEnqueue_ThenNoConnectionAfterFourAttempts() async {
+        mockApiClient.enqueueHandler = { _, _, _, _, _, _ in
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let result = await provider.tryEnqueue(enqueueToken: nil, enqueueKey: nil)
+
+        XCTAssertEqual(result.error?.code, .noConnection)
+        XCTAssertNil(result.result)
+        XCTAssertEqual(mockApiClient.enqueueCallCount, 4)
+    }
+
+    func testGivenEveryAttemptFailsWithServerError_WhenTryEnqueue_ThenQueueitUnavailable() async {
+        mockApiClient.enqueueHandler = { _, _, _, _, _, _ in
+            throw QueueError(.apiError)
+        }
+
+        let result = await provider.tryEnqueue(enqueueToken: nil, enqueueKey: nil)
+
+        XCTAssertEqual(result.error?.code, .queueitUnavailable)
+        XCTAssertEqual(mockApiClient.enqueueCallCount, 4)
+    }
+
+    func testGivenEveryAttemptTimesOut_WhenTryEnqueue_ThenQueueitUnavailable() async {
+        mockApiClient.enqueueHandler = { _, _, _, _, _, _ in
+            throw URLError(.timedOut)
+        }
+
+        let result = await provider.tryEnqueue(enqueueToken: nil, enqueueKey: nil)
+
+        XCTAssertEqual(result.error?.code, .queueitUnavailable)
+        XCTAssertEqual(mockApiClient.enqueueCallCount, 4)
+    }
+
+    func testGivenLastAttemptFailsWithOtherUrlError_WhenTryEnqueue_ThenQueueitUnavailable() async {
+        mockApiClient.enqueueHandler = { _, _, _, _, _, _ in
+            throw URLError(.cannotConnectToHost)
+        }
+
+        let result = await provider.tryEnqueue(enqueueToken: nil, enqueueKey: nil)
+
+        XCTAssertEqual(result.error?.code, .queueitUnavailable)
+        XCTAssertEqual(mockApiClient.enqueueCallCount, 4)
+    }
+
+    func testGivenReleasedProvider_WhenTryEnqueueOnSecondProvider_ThenMonitoringStaysStartedAndCheckReadsLiveMonitor() async throws {
+        var first: QueueItWaitingRoomProvider? = QueueItWaitingRoomProvider(customerId: "c", waitingRoomOrAliasId: "e", themeName: nil, language: nil, apiClient: MockQueueItApiClient())
+        _ = await first?.getIsRequestInProgress()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        first = nil
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let startedWhenProviderReleased = await NetworkUtils.networkState.hasStartedMonitoring()
+
+        mockApiClient.enqueueHandler = { _, _, _, _, _, _ in
+            return EnqueueSuccessResponse(queueId: nil, queueUrl: nil, queueUrlTTLInMinutes: nil, eventTargetUrl: nil, queueitToken: "~rt_safetynet~")
+        }
+        let result = await provider.tryEnqueue(enqueueToken: nil, enqueueKey: nil)
+
+        XCTAssertTrue(startedWhenProviderReleased)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(result.result?.queueItToken, "~rt_safetynet~")
+    }
+
     func testTryEnqueue_requestAlreadyInProgress() async {
         // Given
         await provider.setIsRequestInProgress(true) // Manually set request as in progress

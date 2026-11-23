@@ -22,8 +22,10 @@ actor NetworkState {
         return startedMonitoring
     }
 
-    func setStartedMonitoring(_ started: Bool) {
-        startedMonitoring = started
+    func markStarted() -> Bool {
+        guard !startedMonitoring else { return false }
+        startedMonitoring = true
+        return true
     }
 }
 
@@ -31,14 +33,11 @@ class NetworkUtils {
     private static let TAG = "NetworkUtils"
     private static let monitor = NWPathMonitor()
     private static let queue = DispatchQueue(label: "NetworkUtilsMonitor")
-    private static let networkState = NetworkState()
+    static let networkState = NetworkState()
 
     static func startMonitoring() {
         Task {
-            let alreadyStarted = await networkState.hasStartedMonitoring()
-            guard !alreadyStarted else { return }
-
-            await networkState.setStartedMonitoring(true)
+            guard await networkState.markStarted() else { return }
 
             monitor.pathUpdateHandler = { path in
                 let isOnline = path.status == .satisfied
@@ -50,17 +49,6 @@ class NetworkUtils {
 
             monitor.start(queue: queue)
             QueueItLogger.debug(TAG, "Started network monitoring.")
-        }
-    }
-
-    static func stopMonitoring() {
-        Task {
-            let alreadyStarted = await networkState.hasStartedMonitoring()
-            guard alreadyStarted else { return }
-
-            monitor.cancel()
-            await networkState.setStartedMonitoring(false)
-            QueueItLogger.debug(TAG, "Stopped network monitoring.")
         }
     }
 

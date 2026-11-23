@@ -5,7 +5,7 @@ import WebKit
 
 public class QueueItEngine {
     private static let TAG = "QueueItEngine"
-    private let provider: QueueItWaitingRoomProvider
+    var provider: QueueItWaitingRoomProvider
     public let viewManager: QueueItViewManager
     private var options: QueueItEngineOptions
     public weak var queueListener: QueueListener?
@@ -55,7 +55,7 @@ public class QueueItEngine {
         QueueItLogger.debug(QueueItEngine.TAG, "runWithEnqueueToken() called")
         guard !enqueueToken.isEmpty else {
              QueueItLogger.error(QueueItEngine.TAG, "EnqueueToken cannot be empty")
-             self.queueListener?.onError(QueueError(.invalidResponse), errorMessage: "EnqueueToken cannot be empty")
+             await self.notifyError(QueueError(.invalidResponse), message: "EnqueueToken cannot be empty")
              return
         }
         await self.runWithConnection(enqueueToken: enqueueToken, enqueueKey: nil)
@@ -65,7 +65,7 @@ public class QueueItEngine {
         QueueItLogger.debug(QueueItEngine.TAG, "runWithEnqueueKey() called")
          guard !enqueueKey.isEmpty else {
              QueueItLogger.error(QueueItEngine.TAG, "EnqueueKey cannot be empty")
-             self.queueListener?.onError(QueueError(.invalidResponse), errorMessage: "EnqueueKey cannot be empty")
+             await self.notifyError(QueueError(.invalidResponse), message: "EnqueueKey cannot be empty")
              return
          }
         await self.runWithConnection(enqueueToken: nil, enqueueKey: enqueueKey)
@@ -75,7 +75,7 @@ public class QueueItEngine {
          QueueItLogger.debug(QueueItEngine.TAG, "tryPass(\(enqueueToken ?? "nil"), \(enqueueKey ?? "nil")) called")
          let tryEnqueueResult = await self.provider.tryEnqueue(enqueueToken: enqueueToken, enqueueKey: enqueueKey)
          if let error = tryEnqueueResult.error {
-             self.handleCheckError(error, message: tryEnqueueResult.errorMessage)
+             await self.handleCheckError(error, message: tryEnqueueResult.errorMessage)
              return nil
          }
          return tryEnqueueResult.result
@@ -138,7 +138,11 @@ public class QueueItEngine {
         }
     }
 
-    func handleCheckError(_ error: QueueError, message: String?) {
+    @MainActor private func notifyError(_ error: QueueError, message: String) {
+        self.queueListener?.onError(error, errorMessage: message)
+    }
+
+    @MainActor func handleCheckError(_ error: QueueError, message: String?) {
         let errorMessage = message ?? "An unknown error occurred"
         QueueItLogger.error(QueueItEngine.TAG, "Check failed: \(error.code.rawValue) - \(errorMessage)")
         switch error.code {

@@ -31,10 +31,6 @@ actor QueueItWaitingRoomProvider {
         NetworkUtils.startMonitoring()
     }
 
-    deinit {
-        NetworkUtils.stopMonitoring()
-    }
-
     nonisolated public var sdkVersion: String {
         return VersionManager.sdkVersion
     }
@@ -79,7 +75,7 @@ actor QueueItWaitingRoomProvider {
             result = TryEnqueueResult(error: error, errorMessage: error.localizedDescription)
         } catch {
             QueueItLogger.error(QueueItWaitingRoomProvider.TAG, "tryEnqueue failed: \(error.localizedDescription)")
-            result = TryEnqueueResult(error: QueueError(.apiError), errorMessage: error.localizedDescription)
+            result = TryEnqueueResult(error: QueueError(.queueitUnavailable), errorMessage: error.localizedDescription)
         }
         
         return result
@@ -135,7 +131,11 @@ actor QueueItWaitingRoomProvider {
         }
 
         QueueItLogger.error(QueueItWaitingRoomProvider.TAG, "Enqueue failed after multiple retries. Last error: \(lastError?.localizedDescription ?? "None")")
-        throw lastError ?? QueueError(.queueitUnavailable)
+        let nsError = lastError as NSError?
+        if nsError?.domain == NSURLErrorDomain && nsError?.code == NSURLErrorNotConnectedToInternet {
+            throw QueueError(.noConnection)
+        }
+        throw QueueError(.queueitUnavailable)
     }
 
     func handleAppEnqueueResponse(apiResult: EnqueueSuccessResponse, userId: String) -> TryEnqueueResult {
