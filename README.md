@@ -30,7 +30,7 @@ If you're building a Swift package, add QueueItKit as a dependency:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.1.0")
+    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.2.0")
 ]
 ```
 
@@ -68,6 +68,8 @@ QueueListener is the primary callback interface used by QueueItKit to notify you
 
 Your ViewModel, ViewController, or Coordinator should conform to this protocol to respond to queue state changes, errors, and WebView events.
 
+Every `QueueListener` method is called on the main thread.
+
 #### Purpose
 QueueListener enables your application to:
 
@@ -81,8 +83,8 @@ QueueListener enables your application to:
 * onQueuePassed(_:) - Called when the user has successfully passed the queue. Use this to retrieve and store the queueItToken.
 * onQueueViewWillOpen() - Triggered just before the queue WebView opens.
 * onQueueDisabled(_:) - Indicates that the queue is in 'disabled' state. Not raised on the `tryPass()` + `showQueue(queueTryPassResult:)` path: a disabled, idle or after-event waiting room is returned by `tryPass()` with a `queueItToken`, and `showQueue(queueTryPassResult:)` reports it through `onQueuePassed(_:)`. Check the result's `redirectType` if you need to tell them apart.
-* onQueueItUnavailable() - Called when Queue‑it services cannot be reached.
-* onError(_:errorMessage:) - Called when the SDK encounters errors (e.g., network issues or invalid configs).
+* onQueueItUnavailable() - Called when Queue‑it cannot be reached after the retries (server errors, timeouts, other network failures).
+* onError(_:errorMessage:) - Called when the SDK encounters errors (e.g., no connection or invalid configs).
 
 #### Optional Methods
 These include built‑in default empty implementations:
@@ -91,6 +93,7 @@ These include built‑in default empty implementations:
 * onSessionRestart() — Queue-it restarted the session
 * onQueueUrlChanged(_ url:) — Useful for logging or analytics
 * onSSLError(_ errorMessage:) — Called when the SDK encounters SSL issues inside WebView
+* onUserExited() - Called when the visitor leaves through the waiting-room page's leave link. The SDK does not close the room; if your app calls `hideQueue()` here, the leave request is stopped before Queue-it frees the visitor's place
 
 ### Initialize QueueItEngine
 
@@ -656,8 +659,9 @@ engine = QueueItEngine(
         }
         
         func dismissWebView() {
-            guard let webVC = presentedWebVC else { return }
-            webVC.dismiss(animated: true) {
+            guard presentedWebVC != nil else { return }
+            // Dismiss from here: the room may still be showing a page alert, which webVC.dismiss would close instead.
+            dismiss(animated: true) {
                 self.presentedWebVC = nil
             }
         }

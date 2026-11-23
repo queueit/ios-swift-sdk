@@ -64,4 +64,28 @@ class QueueItEngineIntegrationTests: XCTestCase {
         XCTAssertFalse(listener.onQueuePassedCalled, "onQueuePassed should not be called")
         XCTAssertFalse(listener.onQueueDisabledCalled, "onQueueDisabled should not be called")
     }
+
+    @MainActor
+    func testGivenBackgroundTask_WhenRunWithEnqueueToken_ThenEmptyTokenErrorAlreadyDeliveredOnMainThreadWhenCallReturns() async {
+        let listener = MockListener()
+        let engine = makeEngine(listener: listener)
+
+        await Task.detached { await engine.runWithEnqueueToken("") }.value
+
+        XCTAssertEqual(listener.lastError?.code, .invalidResponse)
+        XCTAssertEqual(listener.lastErrorMessage, "EnqueueToken cannot be empty")
+        XCTAssertTrue(listener.allCallsOnMainThread)
+    }
+
+    @MainActor
+    func testGivenBackgroundTask_WhenRunWithEnqueueKey_ThenEmptyKeyErrorAlreadyDeliveredOnMainThreadWhenCallReturns() async {
+        let listener = MockListener()
+        let engine = makeEngine(listener: listener)
+
+        await Task.detached { await engine.runWithEnqueueKey("") }.value
+
+        XCTAssertEqual(listener.lastError?.code, .invalidResponse)
+        XCTAssertEqual(listener.lastErrorMessage, "EnqueueKey cannot be empty")
+        XCTAssertTrue(listener.allCallsOnMainThread)
+    }
 }

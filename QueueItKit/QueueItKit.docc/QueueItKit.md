@@ -29,7 +29,7 @@ Using `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.1.0")
+    .package(url: "https://github.com/queueit/ios-swift-sdk", from: "1.2.0")
 ]
 ```
 
@@ -160,20 +160,21 @@ The main engine that handles the queue logic and WebView presentation.
 
 - ``QueueListener``
 
-The primary callback interface used by QueueItKit to notify your app about key events during the queue lifecycle.
+The primary callback interface used by QueueItKit to notify your app about key events during the queue lifecycle. Every call arrives on the main thread.
 
 **Required Methods:**
 - `onQueuePassed(_:)` - User successfully passed the queue (retrieve and store queueItToken)
 - `onQueueViewWillOpen()` - Queue WebView is about to open
 - `onQueueDisabled(_:)` - Queue is in disabled state
-- `onQueueItUnavailable()` - Queue-it services cannot be reached
-- `onError(_:errorMessage:)` - SDK encountered an error
+- `onQueueItUnavailable()` - Queue-it cannot be reached after the retries (server errors, timeouts, other network failures)
+- `onError(_:errorMessage:)` - SDK encountered an error (for example no connection or invalid configuration)
 
 **Optional Methods:**
 - `onWebViewClosed()` - User closed WebView
 - `onSessionRestart()` - Queue-it restarted the session
 - `onQueueUrlChanged(_:)` - URL changed (useful for analytics)
 - `onSSLError(_:)` - SSL issue detected
+- `onUserExited()` - Visitor left through the waiting-room page's leave link; the SDK does not close the room
 
 ### Configuration
 

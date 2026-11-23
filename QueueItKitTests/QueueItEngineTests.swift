@@ -447,4 +447,19 @@ class QueueItEngineTests: XCTestCase {
         XCTAssertFalse(listener.onQueueDisabledCalled)
         XCTAssertFalse(listener.onErrorCalled) // Error from ViewManager is tested in its own suite
     }
+
+    @MainActor
+    func testGivenBackgroundTask_WhenTryPassFails_ThenErrorAlreadyDeliveredOnMainThreadWhenCallReturns() async {
+        let listener = MockListener()
+        let engine = makeEngine(listener: listener)
+        let apiClient = MockQueueItApiClient()
+        apiClient.queueError = QueueError(.invalidResponse)
+        engine.provider = QueueItWaitingRoomProvider(customerId: "testcustomer", waitingRoomOrAliasId: "testevent", themeName: nil, language: nil, apiClient: apiClient)
+
+        let result = await Task.detached { await engine.tryPass() }.value
+
+        XCTAssertNil(result)
+        XCTAssertEqual(listener.lastError?.code, .invalidResponse)
+        XCTAssertTrue(listener.allCallsOnMainThread)
+    }
 }
